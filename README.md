@@ -29,10 +29,12 @@ Disable it in the Plugin Hub or delete `usr/plugins/youcom_search/`. It leaves n
 
 ## Development
 
+Dev-only files (tests, pytest config, dev requirements) live in `dev/`, outside the plugin's runtime layout.
+
 ```
-pip install -r requirements-dev.txt
-pytest                 # mocked HTTP
-YDC_LIVE=1 pytest      # also runs one live keyless smoke test
+pip install -r dev/requirements-dev.txt
+pytest -c dev/pytest.ini                 # mocked HTTP
+YDC_LIVE=1 pytest -c dev/pytest.ini      # also runs one live keyless smoke test
 ```
 
 Tested against Agent Zero v2.14. Learn more at [you.com](https://you.com/?utm_source=agent0ai-agent-zero&utm_medium=oss_integration&utm_campaign=2026-10-oss-integrations&utm_content=plugin-readme).

@@ -9,7 +9,7 @@ import pathlib
 import sys
 import types
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 def _load(name, path):
