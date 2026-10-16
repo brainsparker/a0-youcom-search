@@ -1,0 +1,8 @@
+name: youcom_search
+title: You.com Search
+description: Keyless You.com web search tool next to SearXNG.
+version: 1.0.0
+settings_sections:
+  - agent
+per_project_config: true
+per_agent_config: false

@@ -1,0 +1,68 @@
+<html>
+<head>
+    <title>You.com Search</title>
+</head>
+
+<body>
+    <div x-data="{
+        defaults: { api_key: '', results: 10, timeout: 15, fallback_to_searxng: true },
+        initDefaults() {
+            for (const [key, value] of Object.entries(this.defaults)) {
+                if (config[key] === undefined || config[key] === null) config[key] = value;
+            }
+        },
+    }">
+        <template x-if="config">
+            <div x-init="initDefaults()">
+                <div class="section-title">You.com Search</div>
+                <div class="section-description">
+                    Works without a key (100 searches a day). An optional key switches to the keyed Search API.
+                    You can also set <code>YDC_API_KEY</code> in Agent Zero secrets instead.
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">API key (optional)</div>
+                        <div class="field-description">Leave empty to use YDC_API_KEY from secrets, or the keyless endpoint.</div>
+                    </div>
+                    <div class="field-control">
+                        <input type="password" autocomplete="off" x-model="config.api_key" />
+                    </div>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">Results</div>
+                        <div class="field-description">Maximum results returned to the agent.</div>
+                    </div>
+                    <div class="field-control">
+                        <input type="number" min="1" max="50" step="1" x-model.number="config.results" />
+                    </div>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">Timeout (seconds)</div>
+                    </div>
+                    <div class="field-control">
+                        <input type="number" min="1" step="1" x-model.number="config.timeout" />
+                    </div>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">Fall back to SearXNG</div>
+                        <div class="field-description">When the free daily limit is reached, run the built-in SearXNG search.</div>
+                    </div>
+                    <div class="field-control">
+                        <label class="toggle">
+                            <input type="checkbox" x-model="config.fallback_to_searxng" />
+                            <span class="toggler"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </div>
+</body>
+</html>
