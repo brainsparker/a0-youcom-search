@@ -5,7 +5,7 @@
 
 <body>
     <div x-data="{
-        defaults: { api_key: '', results: 10, timeout: 15, fallback_to_searxng: true },
+        defaults: { api_key: '', results: 10, timeout: 15, fallback_to_searxng: true, show_dates: true, widen_freshness: true },
         initDefaults() {
             for (const [key, value] of Object.entries(this.defaults)) {
                 if (config[key] === undefined || config[key] === null) config[key] = value;
@@ -57,6 +57,32 @@
                     <div class="field-control">
                         <label class="toggle">
                             <input type="checkbox" x-model="config.fallback_to_searxng" />
+                            <span class="toggler"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">Show page dates</div>
+                        <div class="field-description">Put the page date after each title when You.com has one, so the agent can judge how current a result is.</div>
+                    </div>
+                    <div class="field-control">
+                        <label class="toggle">
+                            <input type="checkbox" x-model="config.show_dates" />
+                            <span class="toggler"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <div class="field-label">
+                        <div class="field-title">Widen an empty time window</div>
+                        <div class="field-description">When a freshness window has no results, try the next wider window once (day, then week, then month, then year). Uses one more search.</div>
+                    </div>
+                    <div class="field-control">
+                        <label class="toggle">
+                            <input type="checkbox" x-model="config.widen_freshness" />
                             <span class="toggler"></span>
                         </label>
                     </div>
