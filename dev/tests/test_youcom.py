@@ -13,6 +13,13 @@ SAMPLE = {"results": {"web": [
     {"url": "https://b.example", "title": "B", "description": "", "snippets": ["snip b"]},
     {"title": "no url"},
 ]}}
+DATED = {"results": {"web": [
+    {"url": "https://a.example", "title": "A", "description": "desc a", "page_age": "2026-11-14T13:28:53"},
+    {"url": "https://b.example", "title": "B", "description": "desc b", "page_age": None},
+    {"url": "https://c.example", "title": "C", "description": "desc c", "page_age": "3 days ago"},
+    {"url": "https://d.example", "title": "D", "description": "desc d", "page_age": "2026-11-09"},
+]}}
+EMPTY = {"results": {}}  # what You.com returns when a freshness window has nothing
 
 
 class _Resp:
@@ -123,6 +130,64 @@ async def test_429_and_errors():
             await client.search("x")
 
 
+def test_normalize_freshness():
+    n = client.normalize_freshness
+    assert n(None) is None and n("") is None and n("  ") is None and n("any") is None
+    assert [n(v) for v in ("day", "Week", " MONTH ", "year")] == ["day", "week", "month", "year"]
+    assert [n(v) for v in ("d", "24h", "today", "w", "7d", "m", "30d", "y")] == [
+        "day", "day", "day", "week", "week", "month", "month", "year"]
+    assert n("past week") == "week" and n("last month") == "month"
+    assert n("2026-11-01to2026-11-10") == "2026-11-01to2026-11-10"
+    assert n("2026-11-01 to 2026-11-10") == "2026-11-01to2026-11-10"
+    assert n("2026-11-01..2026-11-10") == "2026-11-01to2026-11-10"
+    assert n("2026-11-10/2026-11-01") == "2026-11-01to2026-11-10"  # reversed range is put in order
+    for bad in ("fortnight", "2026-13-01to2026-13-02", "2026-11-01", "hour"):
+        with pytest.raises(client.InvalidFreshness, match="freshness must be one of"):
+            n(bad)
+    assert issubclass(client.InvalidFreshness, client.YouComError)
+
+
+def test_describe_freshness():
+    assert client.describe_freshness("day") == "the past day"
+    assert client.describe_freshness("2026-11-01to2026-11-10") == "2026-11-01 to 2026-11-10"
+    # every window but the widest has a wider one, and it is a real window
+    assert set(client.WIDER_FRESHNESS) == set(client.FRESHNESS_WINDOWS) - {"year"}
+    assert set(client.WIDER_FRESHNESS.values()) <= set(client.FRESHNESS_WINDOWS)
+
+
+def test_build_request_freshness():
+    _, params, _ = client.build_request("q", 5, None, "week")
+    assert params == {"query": "q", "count": "5", "freshness": "week"}
+    url, params, _ = client.build_request("q", 5, "k", "2026-11-01to2026-11-10")
+    assert url == client.KEYED_URL and params["freshness"] == "2026-11-01to2026-11-10"
+    assert "freshness" not in client.build_request("q", 5, None, None)[1]
+
+
+def test_page_dates():
+    res = client.parse_results(DATED, 10)
+    assert [r.date for r in res] == ["2026-11-14", "", "", "2026-11-09"]
+    assert client.format_results(res) == (
+        "A\nhttps://a.example\ndesc a\n\nB\nhttps://b.example\ndesc b\n\n"
+        "C\nhttps://c.example\ndesc c\n\nD\nhttps://d.example\ndesc d")
+    assert client.format_results(res, show_dates=True) == (
+        "A (2026-11-14)\nhttps://a.example\ndesc a\n\nB\nhttps://b.example\ndesc b\n\n"
+        "C\nhttps://c.example\ndesc c\n\nD (2026-11-09)\nhttps://d.example\ndesc d")
+
+
+@pytest.mark.asyncio
+async def test_search_sends_freshness():
+    with MockHTTP() as m:
+        m.get(KEYLESS, payload=DATED)
+        res = await client.search("hello", freshness="W")
+        (key, calls), = m.requests.items()
+        assert calls[0].kwargs["params"]["freshness"] == "week"
+    assert res.results[0].date == "2026-11-14"
+    with MockHTTP() as m:  # an invalid window never reaches the network
+        with pytest.raises(client.InvalidFreshness):
+            await client.search("hello", freshness="fortnight")
+        assert m.requests == {}
+
+
 async def _noop(*a, **k):
     return None
 
@@ -165,6 +230,94 @@ async def test_tool_429_falls_back_to_searxng(monkeypatch):
     assert r.message == client.LIMIT_MESSAGE
 
 
+def _sent(m):
+    """Freshness value of every request, in order."""
+    return [c.kwargs["params"].get("freshness") for calls in m.requests.values() for c in calls]
+
+
+@pytest.mark.asyncio
+async def test_tool_freshness_and_dates(monkeypatch):
+    monkeypatch.delenv("YDC_API_KEY", raising=False)
+    plugins_mod.CONFIG = {}
+    with MockHTTP() as m:
+        m.get(KEYLESS, payload=DATED)
+        r = await tool.YouComSearch(agent=_agent()).execute(query="hi", freshness="week")
+        assert _sent(m) == ["week"]
+    assert r.message.startswith("A (2026-11-14)\nhttps://a.example")
+    plugins_mod.CONFIG = {"show_dates": False}
+    with MockHTTP() as m:
+        m.get(KEYLESS, payload=DATED)
+        r = await tool.YouComSearch(agent=_agent()).execute(query="hi")
+        assert _sent(m) == [None]  # no freshness arg, no freshness param
+    assert r.message.startswith("A\nhttps://a.example")
+
+
+@pytest.mark.asyncio
+async def test_tool_invalid_freshness_costs_no_search(monkeypatch):
+    monkeypatch.delenv("YDC_API_KEY", raising=False)
+    plugins_mod.CONFIG = {}
+    with MockHTTP() as m:
+        r = await tool.YouComSearch(agent=_agent()).execute(query="hi", freshness="fortnight")
+        assert m.requests == {}
+    assert "freshness must be one of day, week, month, year" in r.message and "'fortnight'" in r.message
+    assert r.break_loop is False
+
+
+@pytest.mark.asyncio
+async def test_tool_widens_an_empty_window(monkeypatch):
+    monkeypatch.delenv("YDC_API_KEY", raising=False)
+    plugins_mod.CONFIG = {}
+    with MockHTTP() as m:  # day is empty, week has results
+        m.get(re.compile(r".*freshness=day.*"), payload=EMPTY)
+        m.get(re.compile(r".*freshness=week.*"), payload=DATED)
+        r = await tool.YouComSearch(agent=_agent()).execute(query="hi", freshness="day")
+        assert _sent(m) == ["day", "week"]
+    assert r.message.startswith("No You.com results from the past day; showing the past week instead.\n\nA (2026-11-14)")
+    with MockHTTP() as m:  # both empty: one widening step only, then say so
+        m.get(re.compile(r".*freshness=month.*"), payload=EMPTY)
+        m.get(re.compile(r".*freshness=year.*"), payload={"results": {"web": []}})
+        r = await tool.YouComSearch(agent=_agent()).execute(query="hi", freshness="month")
+        assert _sent(m) == ["month", "year"]
+    assert r.message.startswith("No You.com results from the past month or the past year.")
+    with MockHTTP() as m:  # year is the widest window
+        m.get(KEYLESS, payload=EMPTY)
+        r = await tool.YouComSearch(agent=_agent()).execute(query="hi", freshness="year")
+        assert _sent(m) == ["year"]
+    assert r.message.startswith("No You.com results from the past year.")
+    with MockHTTP() as m:  # a date range is exact and is never widened
+        m.get(KEYLESS, payload=EMPTY)
+        r = await tool.YouComSearch(agent=_agent()).execute(query="hi", freshness="2026-11-01to2026-11-02")
+        assert _sent(m) == ["2026-11-01to2026-11-02"]
+    assert r.message.startswith("No You.com results from 2026-11-01 to 2026-11-02.")
+    plugins_mod.CONFIG = {"widen_freshness": False}
+    with MockHTTP() as m:  # widening switched off
+        m.get(KEYLESS, payload=EMPTY)
+        r = await tool.YouComSearch(agent=_agent()).execute(query="hi", freshness="day")
+        assert _sent(m) == ["day"]
+    assert r.message.startswith("No You.com results from the past day.")
+    plugins_mod.CONFIG = {}
+    with MockHTTP() as m:  # no window asked for: plain empty message, one request
+        m.get(KEYLESS, payload=EMPTY)
+        r = await tool.YouComSearch(agent=_agent()).execute(query="hi")
+        assert _sent(m) == [None]
+    assert r.message == "No results from You.com."
+
+
+@pytest.mark.asyncio
+async def test_tool_429_during_freshness(monkeypatch):
+    monkeypatch.delenv("YDC_API_KEY", raising=False)
+    plugins_mod.CONFIG = {"fallback_to_searxng": True}
+    with MockHTTP() as m:  # limit hit on the first call
+        m.get(KEYLESS, status=429)
+        r = await tool.YouComSearch(agent=_agent()).execute(query="hi", freshness="day")
+    assert "SearXNG results instead (not time-filtered):" in r.message and "https://sx.example" in r.message
+    with MockHTTP() as m:  # limit hit on the widening call
+        m.get(re.compile(r".*freshness=day.*"), payload=EMPTY)
+        m.get(re.compile(r".*freshness=week.*"), status=429)
+        r = await tool.YouComSearch(agent=_agent()).execute(query="hi", freshness="day")
+    assert r.message.startswith(client.LIMIT_MESSAGE) and "not time-filtered" in r.message
+
+
 @pytest.mark.asyncio
 async def test_tool_empty_query():
     r = await tool.YouComSearch(agent=_agent()).execute(query="")
@@ -180,3 +333,19 @@ async def test_live_keyless_smoke():
     except client.YouComRateLimited:
         pytest.skip("free daily limit reached")
     assert res.results and all(r.url.startswith("http") for r in res.results)
+
+
+@pytest.mark.live
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.environ.get("YDC_LIVE") != "1", reason="set YDC_LIVE=1 for the live keyless smoke test")
+async def test_live_keyless_freshness():
+    import datetime
+    try:
+        res = await client.search("AI agents news", count=5, freshness="week")
+    except client.YouComRateLimited:
+        pytest.skip("free daily limit reached")
+    dated = [r.date for r in res.results if r.date]
+    assert dated, "expected page dates on a freshness=week search"
+    # generous bound: the window is a week, pages can be re-dated a little either side
+    oldest = (datetime.date.today() - datetime.timedelta(days=10)).isoformat()
+    assert all(d >= oldest for d in dated), dated

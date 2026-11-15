@@ -5,3 +5,5 @@ api_key: ""
 results: 10        # max results returned to the agent
 timeout: 15        # HTTP timeout in seconds
 fallback_to_searxng: true   # when the free daily limit is hit, run the built-in SearXNG search instead
+show_dates: true    # put the page date after the title when You.com has one: "Title (2026-11-14)"
+widen_freshness: true   # when a freshness window has no results, try the next wider window once (uses one more search)
